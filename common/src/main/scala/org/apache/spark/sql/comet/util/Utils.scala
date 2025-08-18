@@ -197,17 +197,24 @@ object Utils {
    *
    * @param batches
    *   the output batches, each batch is a list of Arrow vectors wrapped in `CometVector`
+   * @param useInternalCompression
+   *   whether to use compression for internal batches, it doesn't make much sense for broadcasts
+   *   for which we would anyway compress again already comressed data before network transfer
    * @param out
    *   the output stream
    */
-  def serializeBatches(batches: Iterator[ColumnarBatch]): Iterator[(Long, ChunkedByteBuffer)] = {
-    batches.map { batch =>
+  def serializeBatches(
+      batches: Iterator[ColumnarBatch],
+      useInternalCompression: Boolean = false): Iterator[(Long, ChunkedByteBuffer)] = {
+    lazy val codec = CompressionCodec.createCodec(SparkEnv.get.conf)
+    batches.filter(_.numRows() > 0).map { batch =>
       val dictionaryProvider: CDataDictionaryProvider = new CDataDictionaryProvider
-
-      val codec = CompressionCodec.createCodec(SparkEnv.get.conf)
       val cbbos = new ChunkedByteBufferOutputStream(1024 * 1024, ByteBuffer.allocate)
-      val out = new DataOutputStream(codec.compressedOutputStream(cbbos))
-
+      val out = if (useInternalCompression) {
+        new DataOutputStream(codec.compressedOutputStream(cbbos))
+      } else {
+        new DataOutputStream(cbbos)
+      }
       val (fieldVectors, batchProviderOpt) = getBatchFieldVectors(batch)
       val root = new VectorSchemaRoot(fieldVectors.asJava)
       val provider = batchProviderOpt.getOrElse(dictionaryProvider)
@@ -232,18 +239,26 @@ object Utils {
    *   the serialized batches
    * @param source
    *   the class that calls this method
+   * @param useInternalCompression
+   *   should be aligned with [[serializeBatches]] method
    * @return
    *   an iterator of ColumnarBatch
    */
-  def decodeBatches(bytes: ChunkedByteBuffer, source: String): Iterator[ColumnarBatch] = {
+  def decodeBatches(
+      bytes: ChunkedByteBuffer,
+      source: String,
+      useInternalCompression: Boolean = false): Iterator[ColumnarBatch] = {
     if (bytes.size == 0) {
       return Iterator.empty
     }
 
-    // use Spark's compression codec (LZ4 by default) and not Comet's compression
-    val codec = CompressionCodec.createCodec(SparkEnv.get.conf)
-    val cbbis = bytes.toInputStream()
-    val ins = new DataInputStream(codec.compressedInputStream(cbbis))
+    val ins = if (useInternalCompression) {
+      // use Spark's compression codec (LZ4 by default) and not Comet's compression
+      val codec = CompressionCodec.createCodec(SparkEnv.get.conf)
+      new DataInputStream(codec.compressedInputStream(bytes.toInputStream()))
+    } else {
+      new DataInputStream(bytes.toInputStream())
+    }
     // batches are in Arrow IPC format
     new ArrowReaderIterator(Channels.newChannel(ins), source)
   }
