@@ -201,28 +201,33 @@ object Utils {
    *   the output stream
    */
   def serializeBatches(batches: Iterator[ColumnarBatch]): Iterator[(Long, ChunkedByteBuffer)] = {
-    batches.filter(_.numRows() > 0).map { batch =>
-      val dictionaryProvider: CDataDictionaryProvider = new CDataDictionaryProvider
-
-      val codec = CompressionCodec.createCodec(SparkEnv.get.conf)
-      val cbbos = new ChunkedByteBufferOutputStream(1024 * 1024, ByteBuffer.allocate)
-      val out = new DataOutputStream(codec.compressedOutputStream(cbbos))
-
-      val (fieldVectors, batchProviderOpt) = getBatchFieldVectors(batch)
-      val root = new VectorSchemaRoot(fieldVectors.asJava)
-      val provider = batchProviderOpt.getOrElse(dictionaryProvider)
-
-      val writer = new ArrowStreamWriter(root, provider, Channels.newChannel(out))
-      writer.start()
-      writer.writeBatch()
-      root.clear()
-      writer.close()
-
-      if (out.size() > 0) {
-        (batch.numRows(), cbbos.toChunkedByteBuffer)
-      } else {
+    batches.map { batch =>
+      if (batch.numRows() == 0) {
         (batch.numRows(), new ChunkedByteBuffer(Array.empty[ByteBuffer]))
+      } else {
+        val dictionaryProvider: CDataDictionaryProvider = new CDataDictionaryProvider
+
+        val codec = CompressionCodec.createCodec(SparkEnv.get.conf)
+        val cbbos = new ChunkedByteBufferOutputStream(1024 * 1024, ByteBuffer.allocate)
+        val out = new DataOutputStream(codec.compressedOutputStream(cbbos))
+
+        val (fieldVectors, batchProviderOpt) = getBatchFieldVectors(batch)
+        val root = new VectorSchemaRoot(fieldVectors.asJava)
+        val provider = batchProviderOpt.getOrElse(dictionaryProvider)
+
+        val writer = new ArrowStreamWriter(root, provider, Channels.newChannel(out))
+        writer.start()
+        writer.writeBatch()
+        root.clear()
+        writer.close()
+
+        if (out.size() > 0) {
+          (batch.numRows(), cbbos.toChunkedByteBuffer)
+        } else {
+          (batch.numRows(), new ChunkedByteBuffer(Array.empty[ByteBuffer]))
+        }
       }
+
     }
   }
 
