@@ -1623,6 +1623,31 @@ impl PhysicalPlanner {
                     ))
                 }
             }
+            OpStruct::CoalesceWrapper(_coalesce_wrapper) => {
+                assert_eq!(children.len(), 1);
+                let (scans, child) = self.create_plan(&children[0], inputs, partition_count)?;
+                let coalesce_batches: Arc<dyn ExecutionPlan> = Arc::new(CoalesceBatchesExec::new(
+                    Arc::clone(&child.native_plan),
+                    self.session_ctx
+                        .state()
+                        .config_options()
+                        .execution
+                        .batch_size,
+                ));
+                let mut additional_native_plans = vec![];
+                if child.native_plan.as_any().is::<HashJoinExec>() {
+                    additional_native_plans.push(Arc::clone(&child.native_plan));
+                }
+                Ok((
+                    scans,
+                    Arc::new(SparkPlan::new_with_additional(
+                        spark_plan.plan_id,
+                        coalesce_batches,
+                        vec![child],
+                        additional_native_plans,
+                    )),
+                ))
+            }
             OpStruct::Window(wnd) => {
                 let (scans, child) = self.create_plan(&children[0], inputs, partition_count)?;
                 let input_schema = child.schema();

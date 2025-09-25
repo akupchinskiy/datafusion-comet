@@ -43,8 +43,8 @@ import org.apache.spark.sql.types._
 import org.apache.comet.{CometConf, ExtendedExplainInfo}
 import org.apache.comet.CometConf.COMET_EXEC_SHUFFLE_ENABLED
 import org.apache.comet.CometSparkSessionExtensions._
+import org.apache.comet.serde.{OperatorOuterClass, QueryPlanSerde}
 import org.apache.comet.serde.OperatorOuterClass.Operator
-import org.apache.comet.serde.QueryPlanSerde
 
 /**
  * Spark physical optimizer rule for replacing Spark operators with Comet operators.
@@ -439,7 +439,19 @@ case class CometExecRule(session: SparkSession) extends Rule[SparkPlan] {
                 CometConf.COMET_EXEC_BROADCAST_EXCHANGE_ENABLED.get(conf) =>
             QueryPlanSerde.operator2Proto(b) match {
               case Some(nativeOp) =>
-                val cometOp = CometBroadcastExchangeExec(b, b.output, b.mode, b.child)
+                val newChild = b.child match {
+                  case hj: CometHashJoinExec =>
+                    val newNativeOp = Operator
+                      .newBuilder()
+                      .setCoalesceWrapper(
+                        OperatorOuterClass.CoalesceWrapper
+                          .newBuilder()
+                          .setChild(hj.nativeOp))
+                      .build()
+                    hj.copy(nativeOp = newNativeOp)
+                  case _ => b.child
+                }
+                val cometOp = CometBroadcastExchangeExec(b, b.output, b.mode, newChild)
                 CometSinkPlaceHolder(nativeOp, b, cometOp)
               case None => b
             }
