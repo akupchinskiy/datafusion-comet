@@ -441,12 +441,13 @@ case class CometExecRule(session: SparkSession) extends Rule[SparkPlan] {
               case Some(nativeOp) =>
                 val newChild = b.child match {
                   case hj: CometHashJoinExec =>
-                    val newNativeOp = Operator
+                    val newNativeOp = OperatorOuterClass.Operator
                       .newBuilder()
-                      .setCoalesceWrapper(
-                        OperatorOuterClass.CoalesceWrapper
-                          .newBuilder()
-                          .setChild(hj.nativeOp))
+                      .setPlanId(op.id)
+                      .addChildren(hj.nativeOp)
+                      .setCoalesceWrapper(OperatorOuterClass.CoalesceWrapper
+                        .newBuilder()
+                        .setChild(hj.nativeOp))
                       .build()
                     hj.copy(nativeOp = newNativeOp)
                   case _ => b.child

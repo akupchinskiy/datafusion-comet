@@ -1635,9 +1635,9 @@ impl PhysicalPlanner {
                         .batch_size,
                 ));
                 let mut additional_native_plans = vec![];
-                if child.native_plan.as_any().is::<HashJoinExec>() {
-                    additional_native_plans.push(Arc::clone(&child.native_plan));
-                }
+                child.additional_native_plans.iter()
+                    .for_each(|p| additional_native_plans.push(Arc::clone(p)));
+                additional_native_plans.push(Arc::clone(&child.native_plan));
                 Ok((
                     scans,
                     Arc::new(SparkPlan::new_with_additional(
