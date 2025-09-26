@@ -205,7 +205,7 @@ object Utils extends CometTypeShim {
    *   the output stream
    */
   def serializeBatches(batches: Iterator[ColumnarBatch]): Iterator[(Long, ChunkedByteBuffer)] = {
-    batches.map { batch =>
+    batches.filter(_.numRows() > 0).map { batch =>
       val dictionaryProvider: CDataDictionaryProvider = new CDataDictionaryProvider
 
       val codec = CompressionCodec.createCodec(SparkEnv.get.conf)
